@@ -22,6 +22,7 @@ int main(int argc, char *argv[]) {
     char *port = argv[1];
 
     char buffer[BUFFER_SIZE];
+    char out_buffer[BUFFER_SIZE];
     int bytes_received = -1;
     int bytes_sent = -1;
 
@@ -108,6 +109,7 @@ int main(int argc, char *argv[]) {
         print_client((struct sockaddr *) &client_sockaddr);
 
         if (fork() == 0) { // This is the child process
+            out_buffer[0] = '\0';
             // Receive request
             bytes_received = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
             if (bytes_received == -1) {
@@ -116,22 +118,34 @@ int main(int argc, char *argv[]) {
             }
             buffer[bytes_received] = '\0';
 
-            // Process request
+            // Parse request
             struct http_request *request = parse_request(buffer, BUFFER_SIZE);
             printf("received %s on %s\n", get_http_request_method(request->method), request->path);
             printf("filetype: %s, body: %s\n", get_http_request_filetype(request->filetype), request->body);
 
             if (request->method == http_request::Method::GET) {
-
+                char *file_buffer = read_file(request->path);
+                if (file_buffer == NULL) {
+                    strcpy(out_buffer, "HTTP/1.1 404 Not Found\r\n\r\n");
+                }
+                else {
+                    char content_length[1000];
+                    sprintf(content_length, "%d", strlen(file_buffer));
+                    strcpy(out_buffer, "HTTP/1.1 200 OK\r\n");
+                    strcat(out_buffer, "Content-Length: ");
+                    strcat(out_buffer, content_length);
+                    strcat(out_buffer, "\r\n\r\n");
+                    strcat(out_buffer, file_buffer);
+                }
             }
             else if (request->method == http_request::Method::POST) {
-
+                strcat(out_buffer, "HTTP/1.1 200 OK\r\n\r\n");
             }
-            
+
             // Send response
             char *response = "HTTP/1.1 200 OK\r\n\r\n";
-            bytes_sent = send(client_fd, (const void *) response, strlen(response), 0);
-            printf("sent bytes: %d/%d \n", bytes_sent, strlen(response));
+            bytes_sent = send(client_fd, (const void *) out_buffer, strlen(out_buffer), 0);
+            printf("sent bytes: %d/%d \n", bytes_sent, strlen(out_buffer));
         }
         else { // This is the parent process
 

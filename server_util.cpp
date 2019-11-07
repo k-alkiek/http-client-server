@@ -20,6 +20,7 @@ const char *get_http_request_filetype(http_request::FileType fileType) {
         case http_request::FileType::HTML: return "HTML";
         case http_request::FileType::TXT: return "TXT";
         case http_request::FileType::JPG: return "JPG";
+        case http_request::FileType::PNG: return "PNG";
     }
 }
 
@@ -65,11 +66,12 @@ struct http_request *parse_request(char buffer[], int buffer_size) {
     // Extracting path
     req_head = strtok(req_head, " ");
     req_head = strtok(NULL, " ");
-    request->path = (char *)malloc(strlen(req_head)+1);
-    strcpy(request->path, req_head);
+    request->path = (char *)malloc(strlen(req_head)+2);
+    strcpy(request->path+1, req_head);
+    request->path[0] = '.';
 
     // Extracting file type
-    char *ext = strchr(request->path, '.');
+    char *ext = strchr(request->path+1, '.');
     if (ext != NULL) {
         char *p = ext;
         for(; *p; ++p) *p = tolower(*p);
@@ -90,4 +92,27 @@ void handle_sigchld(int sig) {
     int saved_errno = errno;
     while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
     errno = saved_errno;
+}
+
+char *read_file(char* path) {
+    char *buffer = 0;
+    long length;
+    FILE * f = fopen (path, "rb");
+
+    if (f) {
+        fseek (f, 0, SEEK_END);
+        length = ftell (f);
+        fseek (f, 0, SEEK_SET);
+        buffer = (char *)malloc(length);
+        if (buffer) {
+            fread (buffer, 1, length, f);
+        }
+        fclose (f);
+
+//        printf("\n %s \n", buffer);
+        return buffer;
+    }
+    else {
+        return NULL;
+    }
 }
