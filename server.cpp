@@ -11,7 +11,7 @@
 
 
 #define BACKLOG 10
-#define BUFFER_SIZE 65535
+#define BUFFER_SIZE 1048576
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -117,35 +117,36 @@ int main(int argc, char *argv[]) {
                 exit(1);
             }
             buffer[bytes_received] = '\0';
-
             // Parse request
+
             struct http_request *request = parse_request(buffer, BUFFER_SIZE);
             printf("received %s on %s\n", get_http_request_method(request->method), request->path);
-            printf("filetype: %s, body: %s\n", get_http_request_filetype(request->filetype), request->body);
+            printf("filetype:%s, content-length:%d\n", get_http_request_filetype(request->filetype), request->content_length);
+            printf("connection:%s, body: %s\n", get_http_request_connection(request->connection), request->body);
 
-            if (request->method == http_request::Method::GET) {
-                char *file_buffer = read_file(request->path);
-                if (file_buffer == NULL) {
-                    strcpy(out_buffer, "HTTP/1.1 404 Not Found\r\n\r\n");
+            // Process request and prepare response
+            if (request->method == http_request::HTTPMethod::GET) {
+                if (request->filetype == http_request::FileType::HTML || request->filetype == http_request::FileType::TXT) {
+                    char *file_buffer = read_file(request->path);
+                    if (file_buffer == NULL) {
+                        load_response_not_found(out_buffer);
+                    }
+                    else {
+                        load_response_text_file(out_buffer, file_buffer, request->filetype);
+                    }
                 }
-                else {
-                    char content_length[1000];
-                    sprintf(content_length, "%d", strlen(file_buffer));
-                    strcpy(out_buffer, "HTTP/1.1 200 OK\r\n");
-                    strcat(out_buffer, "Content-Length: ");
-                    strcat(out_buffer, content_length);
-                    strcat(out_buffer, "\r\n\r\n");
-                    strcat(out_buffer, file_buffer);
+                else if (request->filetype == http_request::FileType::PNG || request->filetype == http_request::FileType::JPG) {
+
                 }
+
             }
-            else if (request->method == http_request::Method::POST) {
-                strcat(out_buffer, "HTTP/1.1 200 OK\r\n\r\n");
+            else if (request->method == http_request::HTTPMethod::POST) {
+                load_response_success(out_buffer);
             }
 
             // Send response
-            char *response = "HTTP/1.1 200 OK\r\n\r\n";
             bytes_sent = send(client_fd, (const void *) out_buffer, strlen(out_buffer), 0);
-            printf("sent bytes: %d/%d \n", bytes_sent, strlen(out_buffer));
+            printf("sent bytes: %d/%d \n\n", bytes_sent, strlen(out_buffer));
         }
         else { // This is the parent process
 
