@@ -22,7 +22,7 @@ int main(int argc, char *argv[]) {
     char *port = argv[1];
 
     char buffer[BUFFER_SIZE];
-    char out_buffer[BUFFER_SIZE];
+    char send_buffer[BUFFER_SIZE];
     int bytes_received = -1;
     int bytes_sent = -1;
 
@@ -44,7 +44,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         exit(1);
     }
-
 
     /* Create and bind socket*/
 
@@ -109,7 +108,7 @@ int main(int argc, char *argv[]) {
         print_client((struct sockaddr *) &client_sockaddr);
 
         if (fork() == 0) { // This is the child process
-            out_buffer[0] = '\0';
+            send_buffer[0] = '\0';
             // Receive request
             bytes_received = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
             if (bytes_received == -1) {
@@ -125,28 +124,30 @@ int main(int argc, char *argv[]) {
             printf("connection:%s, body: %s\n", get_http_request_connection(request->connection), request->body);
 
             // Process request and prepare response
-            if (request->method == http_request::HTTPMethod::GET) {
-                if (request->filetype == http_request::FileType::HTML || request->filetype == http_request::FileType::TXT) {
-                    char *file_buffer = read_file(request->path);
-                    if (file_buffer == NULL) {
-                        load_response_not_found(out_buffer);
-                    }
-                    else {
-                        load_response_text_file(out_buffer, file_buffer, request->filetype);
-                    }
-                }
-                else if (request->filetype == http_request::FileType::PNG || request->filetype == http_request::FileType::JPG) {
+            int response_size;
+            bzero(send_buffer, sizeof(send_buffer));
 
+            if (request->method == http_request::HTTPMethod::GET) {
+                char *file_buffer;
+                int file_size = read_file(request->path, &file_buffer);
+
+                if (file_size == -1) {
+                    response_size = load_response_not_found(send_buffer);
+                }
+                else {
+                    response_size = load_response_file(send_buffer, file_buffer, file_size, request->filetype, "200 OK");
                 }
 
             }
             else if (request->method == http_request::HTTPMethod::POST) {
-                load_response_success(out_buffer);
+                load_response_success(send_buffer);
             }
 
             // Send response
-            bytes_sent = send(client_fd, (const void *) out_buffer, strlen(out_buffer), 0);
-            printf("sent bytes: %d/%d \n\n", bytes_sent, strlen(out_buffer));
+            bytes_sent = send(client_fd, (const void *) send_buffer, response_size, 0);
+            printf("sent bytes: %d/%d \n\n", bytes_sent, response_size);
+
+            close(client_fd);
         }
         else { // This is the parent process
 

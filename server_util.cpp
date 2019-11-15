@@ -7,6 +7,12 @@
 #include <wait.h>
 #include "server_util.h"
 
+void free_http_request(http_request *request) {
+    free(request->path);
+    free(request->body);
+    free(request);
+}
+
 const char *get_http_request_connection(http_request::Connection connection) {
     switch(connection) {
         case http_request::Connection::CLOSED: return "closed";
@@ -28,6 +34,7 @@ const char *get_http_request_filetype(http_request::FileType fileType) {
         case http_request::FileType::TXT: return "TXT";
         case http_request::FileType::JPG: return "JPG";
         case http_request::FileType::PNG: return "PNG";
+        case http_request::FileType::GIF: return "GIF";
     }
 }
 
@@ -114,6 +121,7 @@ struct http_request *parse_request(char buffer[], int buffer_size) {
         else if (!strcmp(ext, "txt")) request->filetype = http_request::FileType::TXT;
         else if (!strcmp(ext, "jpg")) request->filetype = http_request::FileType::JPG;
         else if (!strcmp(ext, "png")) request->filetype = http_request::FileType::PNG;
+        else if (!strcmp(ext, "gif")) request->filetype = http_request::FileType::GIF;
     }
     else {
         request->filetype = http_request::FileType::NONE;
@@ -129,7 +137,7 @@ void handle_sigchld(int sig) {
     errno = saved_errno;
 }
 
-char *read_file(char* path) {
+int read_file(char* path, char** file_buffer) {
     char *buffer = 0;
     long length;
     FILE * f = fopen (path, "rb");
@@ -144,11 +152,12 @@ char *read_file(char* path) {
         }
         fclose (f);
 
-//        printf("\n %s \n", buffer);
-        return buffer;
+//        printf("\n %s\n length=%d\n", buffer, length);
+        *file_buffer = buffer;
+        return length;
     }
     else {
-        return NULL;
+        return -1;
     }
 }
 
@@ -156,36 +165,53 @@ void load_response_success(char *buffer) {
     strcat(buffer, "HTTP/1.1 200 OK\r\n\r\n");
 }
 
-void load_response_not_found(char *buffer) {
-    char *file_buffer = read_file("./not_found.html");
-    char content_length[100];
-    sprintf(content_length, "%d", strlen(file_buffer));
-    strcpy(buffer, "HTTP/1.1 404 Not Found\r\n");
-    strcat(buffer, "Content-Length: ");
-    strcat(buffer, content_length);
-    strcat(buffer, "\r\n");
-    strcat(buffer, "Content-Type: text/html");
-    strcat(buffer, "\r\n\r\n");
-    strcat(buffer, file_buffer);
+int load_response_not_found(char *buffer) {
+    char *file_buffer;
+    int file_size;
+    file_size = read_file("./not_found.html", &file_buffer);
 
-//    strcpy(buffer, "HTTP/1.1 404 Not Found\r\n\r\n");
+    load_response_file(buffer, file_buffer, file_size, http_request::FileType::HTML, "404 Not Found");
 }
 
-void load_response_text_file(char *buffer, char* file_buffer, http_request::FileType type) {
+// Returns total size of response
+int load_response_file(char *buffer, char* file_buffer, int file_size, http_request::FileType type, char* status) {
+    int header_length, body_length;
+
+    strcat(buffer, "HTTP/1.1 200 OK\r\n");
     char content_length[100];
-    sprintf(content_length, "%d", strlen(file_buffer));
-    strcpy(buffer, "HTTP/1.1 200 OK\r\n");
+    sprintf(content_length, "%d", file_size);
     strcat(buffer, "Content-Length: ");
     strcat(buffer, content_length);
     strcat(buffer, "\r\n");
+    load_content_type(buffer, type);
+    strcat(buffer, "\r\n");
+    memcpy(((char*)buffer) + strlen(buffer), file_buffer, file_size);
+
+    free(file_buffer);
+    header_length = strlen(buffer);
+    body_length = file_size;
+    return header_length + body_length;
+}
+
+void load_content_type(char *buffer, http_request::FileType type) {
     strcat(buffer, "Content-Type: ");
-    strcat(buffer, "text/");
-    if (type == http_request::FileType::HTML) {
-        strcat(buffer, "html");
+    switch(type) {
+        case http_request::FileType::HTML:
+            strcat(buffer, "text/html");
+            break;
+        case http_request::FileType::JPG:
+            strcat(buffer, "image/jpg");
+            break;
+        case http_request::FileType::PNG:
+            strcat(buffer, "image/png");
+            break;
+        case http_request::FileType::GIF:
+            strcat(buffer, "image/gif");
+            break;
+        case http_request::FileType::TXT:
+        case http_request::FileType::NONE:
+            strcat(buffer, "text/plain");
+            break;
     }
-    else {
-        strcat(buffer, "plain");
-    }
-    strcat(buffer, "\r\n\r\n");
-    strcat(buffer, file_buffer);
+    strcat(buffer, "\r\n");
 }
