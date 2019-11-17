@@ -7,7 +7,8 @@
 #include <zconf.h>
 #include <libnet.h>
 
-#include "server_util.h"
+#include "server_utils.h"
+#include "utils.h"
 
 
 #define BACKLOG 10
@@ -129,7 +130,9 @@ int main(int argc, char *argv[]) {
 
             if (request->method == http_request::HTTPMethod::GET) {
                 char *file_buffer;
-                int file_size = read_file(request->path, &file_buffer);
+                string actual_path(SERVER_ROOT);
+                actual_path += request->path;
+                int file_size = read_file(actual_path.c_str(), &file_buffer);
 
                 if (file_size == -1) {
                     response_size = load_response_not_found(send_buffer);
@@ -140,7 +143,8 @@ int main(int argc, char *argv[]) {
 
             }
             else if (request->method == http_request::HTTPMethod::POST) {
-                load_response_success(send_buffer);
+                read_bytes = handle_post_request(recv_buffer, it->second, read_bytes);
+                response_size = load_response_success(send_buffer);
             }
 
             // Send response
@@ -148,6 +152,7 @@ int main(int argc, char *argv[]) {
             printf("sent bytes: %d/%d \n\n", bytes_sent, response_size);
 
             close(client_fd);
+            exit(0);
         }
         else { // This is the parent process
 

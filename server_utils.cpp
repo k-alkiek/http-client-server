@@ -5,7 +5,13 @@
 #include <netinet/in.h>
 #include <libnet.h>
 #include <wait.h>
-#include "server_util.h"
+#include <string>
+#include "utils.h"
+#include "server_utils.h"
+
+
+
+using namespace std;
 
 void free_http_request(http_request *request) {
     free(request->path);
@@ -107,9 +113,9 @@ struct http_request *parse_request(char buffer[], int buffer_size) {
     req_head = strtok(buffer, "\r\n");
     req_head = strtok(req_head, " ");
     req_head = strtok(NULL, " ");
-    request->path = (char *)malloc(strlen(req_head)+2);
-    strcpy(request->path+1, req_head);
-    request->path[0] = '.';
+
+    request->path = (char *)malloc(strlen(req_head)+1);
+    strcpy(request->path, req_head);
 
     // Extracting file type
     char *ext = strchr(request->path+1, '.');
@@ -137,7 +143,7 @@ void handle_sigchld(int sig) {
     errno = saved_errno;
 }
 
-int read_file(char* path, char** file_buffer) {
+int read_file(const char* path, char** file_buffer) {
     char *buffer = 0;
     long length;
     FILE * f = fopen (path, "rb");
@@ -161,14 +167,17 @@ int read_file(char* path, char** file_buffer) {
     }
 }
 
-void load_response_success(char *buffer) {
+int load_response_success(char *buffer) {
     strcat(buffer, "HTTP/1.1 200 OK\r\n\r\n");
+    return strlen("HTTP/1.1 200 OK\r\n\r\n");
 }
 
 int load_response_not_found(char *buffer) {
     char *file_buffer;
     int file_size;
-    file_size = read_file("./not_found.html", &file_buffer);
+    string actual_path(SERVER_ROOT);
+    actual_path += "./not_found.html";
+    file_size = read_file(actual_path.c_str(), &file_buffer);
 
     load_response_file(buffer, file_buffer, file_size, http_request::FileType::HTML, "404 Not Found");
 }
@@ -185,11 +194,13 @@ int load_response_file(char *buffer, char* file_buffer, int file_size, http_requ
     strcat(buffer, "\r\n");
     load_content_type(buffer, type);
     strcat(buffer, "\r\n");
-    memcpy(((char*)buffer) + strlen(buffer), file_buffer, file_size);
-
-    free(file_buffer);
     header_length = strlen(buffer);
+
+    memcpy(((char*)buffer) + strlen(buffer), file_buffer, file_size);
+    free(file_buffer);
+
     body_length = file_size;
+    printf("header size: %d, filter size: %d", header_length, file_size);
     return header_length + body_length;
 }
 

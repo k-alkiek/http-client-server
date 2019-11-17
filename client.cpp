@@ -9,46 +9,108 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <zconf.h>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include "client_utils.h"
 
+#define COMMANDS_FILE_PATH "./client_requests"
+# define COMMAND_MAX_LENGTH 256
+
+#define BUFFER_SIZE 1048576
+
+using namespace std;
 
 int main(int argc, char *argv[])
 {
-    // check port argument
+    char *server_ip = "localhost";
+    char *server_port = "80";
 
+    if (argc == 2) {
+            server_ip = argv[1];
+    }
+    else if (argc == 3) {
+        server_ip = argv[1];
+        server_port = argv[2];
+    }
+    else if (argc > 3){
+        fprintf(stderr,"usage: [client server_ip] [port_number]\n");
+        return 1;
+    }
 
+    char recv_buffer[BUFFER_SIZE];
+    char send_buffer[BUFFER_SIZE];
+    int server_socket_fd;
+
+    /* Get address info */
     struct addrinfo hints, *res, *p;
     int status;
     char ipstr[INET6_ADDRSTRLEN];
-    if (argc != 2) {
-        fprintf(stderr,"usage: showip hostname\n");
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET; // AF_INET or AF_INET6 to force version
+    hints.ai_socktype = SOCK_STREAM;
+    if ((status = getaddrinfo(server_ip, server_port, &hints, &res)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
         return 1;
     }
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // AF_INET or AF_INET6 to force version
-    hints.ai_socktype = SOCK_STREAM;
-    if ((status = getaddrinfo(argv[1], NULL, &hints, &res)) != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
+
+    /* loop on address info and attempt connection */
+    for(p = res;p != NULL; p = p->ai_next) {
+        server_socket_fd = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (server_socket_fd == -1) {
+            perror("socket");
+            continue;
+        }
+
+        if (connect(server_socket_fd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(server_socket_fd);
+            perror("connect");
+            continue;
+        }
+        else {
+            break;
+        }
+    }
+
+    if (p == NULL) {
+        fprintf(stderr, "Connection failed");
         return 2;
     }
-    printf("IP addresses for %s:\n\n", argv[1]);
-    for(p = res;p != NULL; p = p->ai_next) {
-        void *addr;
-        char *ipver;
-        // get the pointer to the address itself,
-        // different fields in IPv4 and IPv6:
-        if (p->ai_family == AF_INET) { // IPv4
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-            ipver = "IPv4";
-        } else { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-            ipver = "IPv6";
-        }
-        // convert the IP to a string and print it:
-        inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-        printf(" %s: %s\n", ipver, ipstr);
-    }
+
+    printf("Connected to server\n");
     freeaddrinfo(res); // free the linked list
+
+    /* read commands file */
+    vector<pair<string, string>> commands = read_commands(COMMANDS_FILE_PATH);
+
+
+    for(auto it = commands.begin(); it != commands.end(); ++it) {
+        bzero(send_buffer, BUFFER_SIZE);
+        int buffer_actual_size = 0, read_bytes = 0;
+        int rec_bytes;
+        if (it->first.compare("GET") == 0) {    // GET request
+            buffer_actual_size += load_get_request(send_buffer, it->second.c_str());
+
+            send(server_socket_fd, (const void *) send_buffer, buffer_actual_size, 0);
+            printf("sent:\n%s\n", send_buffer);
+
+            rec_bytes = recv(server_socket_fd, recv_buffer, BUFFER_SIZE - 1, 0);
+            read_bytes = 0;
+            read_bytes = handle_get_response(recv_buffer, it->second, read_bytes);
+            printf("received: %d read: %d", rec_bytes, read_bytes);
+        }
+        else {  // POST request
+            buffer_actual_size += load_post_request(send_buffer, it->second.c_str());
+            send(server_socket_fd, (const void *) send_buffer, buffer_actual_size, 0);
+            printf("sent:\n%s\n", send_buffer);
+
+            rec_bytes = recv(server_socket_fd, recv_buffer, BUFFER_SIZE - 1, 0);
+            read_bytes = 0;
+            printf("received: %d read: %d", rec_bytes, read_bytes);
+        }
+
+    }
+
     return 0;
 }
