@@ -6,6 +6,8 @@
 #ifndef SOCKET_PROG_SERVER_UTILS_H
 #define SOCKET_PROG_SERVER_UTILS_H
 
+#include <unordered_map>
+using namespace std;
 
 struct http_request {
     enum HTTPMethod {GET, POST} method;
@@ -25,7 +27,8 @@ const char *get_http_request_filetype(http_request::FileType fileType);
 
 
 void print_client(struct sockaddr *);
-struct http_request *parse_request(char buffer[], int buffer_size);
+int extract_headers(char* buffer, unordered_map<string, string> *headers);
+int parse_request(char buffer[], int buffer_size, struct http_request **request);
 void handle_sigchld(int sig);
 int read_file(const char* path, char** file_buffer);
 

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <zconf.h>
 #include <libnet.h>
+#include <unordered_map>
 
 #include "server_utils.h"
 #include "utils.h"
@@ -119,19 +120,19 @@ int main(int argc, char *argv[]) {
             buffer[bytes_received] = '\0';
             // Parse request
 
-            struct http_request *request = parse_request(buffer, BUFFER_SIZE);
+            struct http_request *request;
+            int extracted_bytes = 0;
+            extracted_bytes += parse_request(buffer+extracted_bytes, BUFFER_SIZE, &request);
             printf("received %s on %s\n", get_http_request_method(request->method), request->path);
             printf("filetype:%s, content-length:%d\n", get_http_request_filetype(request->filetype), request->content_length);
             printf("connection:%s, body: %s\n", get_http_request_connection(request->connection), request->body);
 
             // Process request and prepare response
             int response_size;
-            bzero(send_buffer, sizeof(send_buffer));
+            string actual_path = get_actual_path(request->path, SERVER_ROOT);
 
-            if (request->method == http_request::HTTPMethod::GET) {
+            if (request->method == http_request::HTTPMethod::GET) {     // GET request
                 char *file_buffer;
-                string actual_path(SERVER_ROOT);
-                actual_path += request->path;
                 int file_size = read_file(actual_path.c_str(), &file_buffer);
 
                 if (file_size == -1) {
@@ -142,8 +143,9 @@ int main(int argc, char *argv[]) {
                 }
 
             }
-            else if (request->method == http_request::HTTPMethod::POST) {
-                read_bytes = handle_post_request(recv_buffer, it->second, read_bytes);
+            else if (request->method == http_request::HTTPMethod::POST) {       // POST request
+//                read_bytes = handle_post_request(recv_buffer, it->second, read_bytes);
+                extract_body_to_file(request->body, request->content_length, actual_path);
                 response_size = load_response_success(send_buffer);
             }
 

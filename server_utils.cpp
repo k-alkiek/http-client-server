@@ -6,6 +6,11 @@
 #include <libnet.h>
 #include <wait.h>
 #include <string>
+#include <unordered_map>
+#include <sstream>
+#include <iostream>
+#include <fstream>
+#include <algorithm>
 #include "utils.h"
 #include "server_utils.h"
 
@@ -60,81 +65,86 @@ void print_client(struct sockaddr * client_sockaddr) {
     }
 }
 
+int extract_headers(char* buffer, unordered_map<string, string> *headers) {
+    char *headers_end = strstr(buffer, "\r\n\r\n");
+    *headers_end = '\0';
+    int headers_length = strlen(buffer)+4;
+    char* token = strtok(buffer, "\r\n");
+    headers->insert(make_pair("Request", string(token)));
+    token = strtok(NULL, "\r\n");
+
+    while (token != NULL) {
+        string token_str(token);
+        int sep_pos = token_str.find(':');
+        string field_name = token_str.substr(0, sep_pos);
+        string field_value = token_str.substr(sep_pos+1);
+        trim((string &) field_value);
+        headers->insert(make_pair(field_name, field_value));
+        token = strtok(NULL, "\r\n");
+    }
+    return headers_length;
+}
+
 /*
  * Extracts info from the request string to a struct http_request
  */
-struct http_request *parse_request(char buffer[], int buffer_size) {
-//    printf("\n %s \n", buffer);
+int parse_request(char buffer[], int buffer_size, struct http_request **request_ptr) {
     struct http_request *request = (struct http_request *)malloc(sizeof(http_request));
 
-    char *req_head, *req_body;
-    char *body_delim = "\r\n\r\n";
+    int headers_length = 0;
+    unordered_map<string, string> headers;
+    headers_length += extract_headers(buffer, &headers);
 
-    // Extracting the body
-    req_body = strstr(buffer, "\r\n\r\n")+4;
-    request->body = (char *)malloc(strlen(req_body)+1);
-    strcpy(request->body, req_body);
+    string request_line = headers.find("Request")->second;
+    stringstream stringstream1(request_line);
+    string method, path;
+    stringstream1 >>  method >> path;
 
-    // Extracting method
-    if (buffer[0] == 'P') {
-        request->method = http_request::HTTPMethod::POST;
-    }
-    else if (buffer[0] == 'G'){
-        request->method = http_request::HTTPMethod::GET;
-    }
+    int content_length = 0;
 
-    // Extracting connection
     request->connection = http_request::Connection::CLOSED;
-    char * connection = strstr(buffer, "Connection: ");
-    if (connection != NULL) {
-        connection += strlen("Connection: ");
-        char *tmp = (char *)malloc(strlen(connection)+1);
-        strcpy(tmp, connection);
-        tmp = strtok(tmp, "\r\n");
-        if (!strcmp(tmp, "keep-alive")) {
-            request->connection = http_request::Connection::KEEP_ALIVE;
+    if (headers.find("Connection") != headers.end() && headers.find("Connection")->second.compare("keep-alive")==0) {
+        request->connection = http_request::Connection::KEEP_ALIVE;
+    }
+    request->path = (char *)(malloc(path.length()+1));
+    strcpy(request->path, path.c_str());
+
+    if(method.compare("GET") == 0) {
+        request->method = http_request::HTTPMethod::GET;
+
+        string ext = get_file_extension(path);
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
+
+        if (ext.compare("html") == 0) {
+            request->filetype = http_request::FileType::HTML;
         }
-        free(tmp);
-    }
+        else if (ext.compare("txt") == 0) {
+            request->filetype = http_request::FileType::TXT;
+        }
+        else if (ext.compare("jpg") == 0) {
+            request->filetype = http_request::FileType::JPG;
+        }
+        else if (ext.compare("png") == 0) {
+            request->filetype = http_request::FileType::PNG;
+        }
+        else if (ext.compare("gif") == 0) {
+            request->filetype = http_request::FileType::GIF;
+        }
+        else {
+            request->filetype = http_request::FileType::NONE;
+        }
 
-
-    // Extracting content length
-    request->content_length = -1;
-    char * content_length = strstr(buffer, "Content-Length: ");
-
-    if (content_length != NULL) {
-        content_length += strlen("Content-Length: ");
-
-        content_length = strtok(content_length, "\r\n");
-        request->content_length = atoi(content_length);
-    }
-
-    // Extracting path
-    req_head = strtok(buffer, "\r\n");
-    req_head = strtok(req_head, " ");
-    req_head = strtok(NULL, " ");
-
-    request->path = (char *)malloc(strlen(req_head)+1);
-    strcpy(request->path, req_head);
-
-    // Extracting file type
-    char *ext = strchr(request->path+1, '.');
-    if (ext != NULL) {
-        char *p = ext;
-        for(; *p; ++p) *p = tolower(*p);
-        ext++;
-        if (!strcmp(ext, "html")) request->filetype = http_request::FileType::HTML;
-        else if (!strcmp(ext, "txt")) request->filetype = http_request::FileType::TXT;
-        else if (!strcmp(ext, "jpg")) request->filetype = http_request::FileType::JPG;
-        else if (!strcmp(ext, "png")) request->filetype = http_request::FileType::PNG;
-        else if (!strcmp(ext, "gif")) request->filetype = http_request::FileType::GIF;
     }
     else {
-        request->filetype = http_request::FileType::NONE;
+        request->method = http_request::HTTPMethod::POST;
+        content_length = stoi(headers.find("Content-Length")->second);
+        request->body = (char *)malloc(content_length);
+        memcpy(request->body, buffer+headers_length, content_length);
     }
+    request->content_length = content_length;
 
-
-    return request;
+    *request_ptr = request;
+    return headers_length + content_length;
 }
 
 void handle_sigchld(int sig) {
@@ -200,7 +210,7 @@ int load_response_file(char *buffer, char* file_buffer, int file_size, http_requ
     free(file_buffer);
 
     body_length = file_size;
-    printf("header size: %d, filter size: %d", header_length, file_size);
+    printf("header size: %d, filter size: %d\n", header_length, file_size);
     return header_length + body_length;
 }
 

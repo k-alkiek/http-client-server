@@ -67,14 +67,7 @@ string get_file_name(string path) {
     return "";
 }
 
-string get_file_extension(string path) {
-    char sep = '.';
-    size_t i = path.rfind(sep, path.length());
-    if (i!= string::npos) {
-        return (path.substr(i+1, path.length() - i));
-    }
-    return "";
-}
+
 
 // Returns number of bytes used by the request
 int load_get_request(char* buffer, string path) {
@@ -130,12 +123,6 @@ void log_body(char* buffer, int content_length) {
     for (char* c = buffer; c != end; c++) {
         printf("%c", *c);
     }
-}
-
-void extract_body_to_file(char* buffer, int content_length, string path) {
-    ofstream file(path);
-    file.write(buffer, content_length);
-    file.close();
 }
 
 int handle_get_response(char* buffer, string path, int extracted_bytes) {

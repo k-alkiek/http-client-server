@@ -3,7 +3,23 @@
 //
 
 #include <string>
+#include <fstream>
 #include "utils.h"
+
+void extract_body_to_file(char* buffer, int content_length, string path) {
+    ofstream file(path);
+    file.write(buffer, content_length);
+    file.close();
+}
+
+string get_file_extension(string path) {
+    char sep = '.';
+    size_t i = path.rfind(sep, path.length());
+    if (i!= string::npos) {
+        return (path.substr(i+1, path.length() - i));
+    }
+    return "";
+}
 
 string get_actual_path(const char* path, const char* root_path) {
     string actual_path(root_path);

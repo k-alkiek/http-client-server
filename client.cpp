@@ -97,7 +97,7 @@ int main(int argc, char *argv[])
 
             rec_bytes = recv(server_socket_fd, recv_buffer, BUFFER_SIZE - 1, 0);
             read_bytes = 0;
-            read_bytes = handle_get_response(recv_buffer, it->second, read_bytes);
+            read_bytes += handle_get_response(recv_buffer, it->second, read_bytes);
             printf("received: %d read: %d", rec_bytes, read_bytes);
         }
         else {  // POST request

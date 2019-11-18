@@ -9,6 +9,8 @@
 
 using namespace std;
 
+void extract_body_to_file(char* buffer, int content_length, string path);
+string get_file_extension(string path);
 string get_actual_path(const char* path, const char* root_path);
 
 string& ltrim(string& str, const string& chars = "\t\n\v\f\r ");
