@@ -4,7 +4,39 @@
 
 #include <string>
 #include <fstream>
+#include <sys/socket.h>
+#include <pcap/socket.h>
+#include <unordered_map>
+#include <cstring>
 #include "utils.h"
+
+int send_all(int socket, const void *data, int data_size) {
+    const char *data_ptr = (const char*) data;
+    int total_bytes_sent = 0;
+    int bytes_sent;
+
+    while (data_size > 0)
+    {
+        int to_send = min(data_size, 1024*1024);
+        bytes_sent = send(socket, data_ptr, to_send, 0);
+        printf("sent %d bytes\n", bytes_sent);
+        if (bytes_sent == -1)
+            return -1;
+
+        data_ptr += bytes_sent;
+        total_bytes_sent += bytes_sent;
+        data_size -= bytes_sent;
+    }
+
+    return total_bytes_sent;
+}
+
+void print_chars(char *buffer, int length) {
+    for (char *c = buffer; c - buffer < length; c++) {
+        printf("%c", *c);
+    }
+    printf("\n");
+}
 
 void extract_body_to_file(char* buffer, int content_length, string path) {
     ofstream file(path);

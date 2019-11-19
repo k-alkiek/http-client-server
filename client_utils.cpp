@@ -9,7 +9,7 @@
 #include "utils.h"
 #include "client_utils.h"
 
-#define CLIENT_ROOT "./client-root"
+
 
 using namespace std;
 
@@ -68,7 +68,6 @@ string get_file_name(string path) {
 }
 
 
-
 // Returns number of bytes used by the request
 int load_get_request(char* buffer, string path) {
     string request = "GET " + path + " HTML/1.1\r\n";
@@ -77,6 +76,18 @@ int load_get_request(char* buffer, string path) {
     memcpy(buffer, request.c_str(), request.length());
 
     return request.length();
+}
+
+int load_post_request_headers(char* buffer, string path, int content_length) {
+    string dest_path = "/" + get_file_name(path);
+    string headers = "POST " + dest_path + " HTML/1.1\r\n";
+    headers += "Content-Type: " + get_file_extension(path) + "\r\n";
+    headers += "Content-Length: " + to_string(content_length) + "\r\n";
+    headers += "Connection: keep-alive\r\n";
+    headers += "\r\n";
+    memcpy(buffer, headers.c_str(), headers.length());
+
+    return headers.length();
 }
 
 int load_post_request(char* buffer, string path) {
@@ -123,14 +134,38 @@ void log_body(char* buffer, int content_length) {
     for (char* c = buffer; c != end; c++) {
         printf("%c", *c);
     }
+    printf("\n\n");
+}
+
+char* construct_body(vector<pair<char*, int>> body, int content_length) {
+    char *full_body = (char *)malloc(content_length);
+    int copied = 0;
+    for(auto it = body.begin(); it != body.end(); ++it) {
+        memcpy(full_body+copied, it->first, it->second);
+        copied += it->second;
+//        for(char *c = it->first; c - it->first < it->second; c++) {
+//            printf("%c", *c);
+//        }
+        free(it->first);
+
+    }
+    return full_body;
+}
+
+int handle_get_response_body(char* body, int content_length, string path) {
+    string dest_path = CLIENT_ROOT;
+    dest_path += "/" + get_file_name(path);
+    extract_body_to_file(body, content_length, dest_path);
+    return 0;
 }
 
 int handle_get_response(char* buffer, string path, int extracted_bytes) {
     unordered_map<string, string> headers;
     extracted_bytes += extract_headers(buffer+extracted_bytes, &headers);
+//    cout << "received: " << headers.find("Status")->second << endl;
     int content_length = stoi(headers.find("Content-Length")->second);
     if (headers.find("Content-Type")->second.substr(0, 4).compare("text") == 0) {
-        log_body(buffer+extracted_bytes, content_length);
+//        log_body(buffer+extracted_bytes, content_length);
     }
     string dest_path = CLIENT_ROOT;
     dest_path += "/" + get_file_name(path);

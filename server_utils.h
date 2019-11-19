@@ -35,6 +35,8 @@ int read_file(const char* path, char** file_buffer);
 int load_response_success(char *buffer);
 int load_response_not_found(char *buffer);
 int load_response_file(char *buffer, char *file_buffer, int file_size, http_request::FileType type, char* status);
+int load_response_file_headers(char *buffer, int file_size, http_request::FileType type, char* status);
 void load_content_type(char *buffer, http_request::FileType type);
 
+std::string exec(const char* cmd);
 #endif //SOCKET_PROG_SERVER_UTILS_H

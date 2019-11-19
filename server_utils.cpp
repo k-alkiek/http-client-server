@@ -57,11 +57,11 @@ void print_client(struct sockaddr * client_sockaddr) {
     if (client_sockaddr->sa_family == AF_INET) { // IPv4
         struct sockaddr_in *sock_addr = (struct sockaddr_in *)client_sockaddr;
         inet_ntop(AF_INET, &sock_addr->sin_addr, client_ip4, INET_ADDRSTRLEN);
-        printf("Client connected from IPv4: %s port %d\n", client_ip4, ntohs(sock_addr->sin_port));
+        printf("\nClient connected from IPv4: %s port %d\n", client_ip4, ntohs(sock_addr->sin_port));
     } else { // IPv6
         struct sockaddr_in6 *sock_addr = (struct sockaddr_in6 *)client_sockaddr;
         inet_ntop(AF_INET6, &sock_addr->sin6_addr, client_ip6, INET6_ADDRSTRLEN);
-        printf("Client connected from IPv6: %s port %d\n", client_ip6, ntohs(sock_addr->sin6_port));
+        printf("\nClient connected from IPv6: %s port %d\n", client_ip6, ntohs(sock_addr->sin6_port));
     }
 }
 
@@ -111,36 +111,36 @@ int parse_request(char buffer[], int buffer_size, struct http_request **request_
 
     if(method.compare("GET") == 0) {
         request->method = http_request::HTTPMethod::GET;
-
-        string ext = get_file_extension(path);
-        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
-
-        if (ext.compare("html") == 0) {
-            request->filetype = http_request::FileType::HTML;
-        }
-        else if (ext.compare("txt") == 0) {
-            request->filetype = http_request::FileType::TXT;
-        }
-        else if (ext.compare("jpg") == 0) {
-            request->filetype = http_request::FileType::JPG;
-        }
-        else if (ext.compare("png") == 0) {
-            request->filetype = http_request::FileType::PNG;
-        }
-        else if (ext.compare("gif") == 0) {
-            request->filetype = http_request::FileType::GIF;
-        }
-        else {
-            request->filetype = http_request::FileType::NONE;
-        }
-
     }
     else {
         request->method = http_request::HTTPMethod::POST;
         content_length = stoi(headers.find("Content-Length")->second);
-        request->body = (char *)malloc(content_length);
-        memcpy(request->body, buffer+headers_length, content_length);
+        request->body = (char *)malloc(buffer_size - headers_length);
+        memcpy(request->body, buffer+headers_length, buffer_size - headers_length);
     }
+
+    string ext = get_file_extension(path);
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
+
+    if (ext.compare("html") == 0) {
+        request->filetype = http_request::FileType::HTML;
+    }
+    else if (ext.compare("txt") == 0) {
+        request->filetype = http_request::FileType::TXT;
+    }
+    else if (ext.compare("jpg") == 0) {
+        request->filetype = http_request::FileType::JPG;
+    }
+    else if (ext.compare("png") == 0) {
+        request->filetype = http_request::FileType::PNG;
+    }
+    else if (ext.compare("gif") == 0) {
+        request->filetype = http_request::FileType::GIF;
+    }
+    else {
+        request->filetype = http_request::FileType::NONE;
+    }
+
     request->content_length = content_length;
 
     *request_ptr = request;
@@ -185,23 +185,26 @@ int load_response_success(char *buffer) {
 int load_response_not_found(char *buffer) {
     char *file_buffer;
     int file_size;
-    string actual_path(SERVER_ROOT);
-    actual_path += "./not_found.html";
+    string actual_path = get_actual_path("/not_found.html", SERVER_ROOT);
     file_size = read_file(actual_path.c_str(), &file_buffer);
 
-    load_response_file(buffer, file_buffer, file_size, http_request::FileType::HTML, "404 Not Found");
+    return load_response_file(buffer, file_buffer, file_size, http_request::FileType::HTML, "404 Not Found");
 }
 
 // Returns total size of response
 int load_response_file(char *buffer, char* file_buffer, int file_size, http_request::FileType type, char* status) {
     int header_length, body_length;
 
-    strcat(buffer, "HTTP/1.1 200 OK\r\n");
+    strcat(buffer, "HTTP/1.1 ");
+    strcat(buffer, status);
+    strcat(buffer, "\r\n");
     char content_length[100];
     sprintf(content_length, "%d", file_size);
     strcat(buffer, "Content-Length: ");
     strcat(buffer, content_length);
     strcat(buffer, "\r\n");
+    strcat(buffer, "Connection: keep-alive\r\n");
+    strcat(buffer, "Keep-Alive: timeout=5, max=100\r\n");
     load_content_type(buffer, type);
     strcat(buffer, "\r\n");
     header_length = strlen(buffer);
@@ -210,8 +213,29 @@ int load_response_file(char *buffer, char* file_buffer, int file_size, http_requ
     free(file_buffer);
 
     body_length = file_size;
-    printf("header size: %d, filter size: %d\n", header_length, file_size);
+    printf("headers size: %d, body size: %d\n", header_length, file_size);
     return header_length + body_length;
+}
+
+int load_response_file_headers(char *buffer, int file_size, http_request::FileType type, char* status) {
+    int header_length;
+
+    strcat(buffer, "HTTP/1.1 ");
+    strcat(buffer, status);
+    strcat(buffer, "\r\n");
+    char content_length[100];
+    sprintf(content_length, "%d", file_size);
+    strcat(buffer, "Content-Length: ");
+    strcat(buffer, content_length);
+    strcat(buffer, "\r\n");
+    strcat(buffer, "Connection: keep-alive\r\n");
+    strcat(buffer, "Keep-Alive: timeout=5, max=100\r\n");
+    load_content_type(buffer, type);
+    strcat(buffer, "\r\n");
+    header_length = strlen(buffer);
+
+
+    return header_length;
 }
 
 void load_content_type(char *buffer, http_request::FileType type) {
@@ -235,4 +259,17 @@ void load_content_type(char *buffer, http_request::FileType type) {
             break;
     }
     strcat(buffer, "\r\n");
+}
+
+std::string exec(const char* cmd) {
+    FILE* pipe = popen(cmd, "r");
+    if (!pipe) return "ERROR";
+    char buffer[128];
+    std::string result = "";
+    while(!feof(pipe)) {
+        if(fgets(buffer, 128, pipe) != NULL)
+            result += buffer;
+    }
+    pclose(pipe);
+    return result;
 }
