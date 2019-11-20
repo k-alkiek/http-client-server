@@ -103,6 +103,7 @@ int main(int argc, char *argv[])
             struct Request *request = create_request(command->first, command->second);
             append_send_buffer(&send_buffer, request);
             pipeline.push(*command);
+            cout << "+++++++++++++++" << endl;
         }
 
         // Send pipelined requests
@@ -159,6 +160,7 @@ int main(int argc, char *argv[])
 //            }
 
             pipeline.pop();
+            cout << "+++++++++++++++" << endl;
         }
     }
 

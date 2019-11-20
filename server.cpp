@@ -19,6 +19,8 @@
 #define BACKLOG 10
 #define BUFFER_SIZE 1024*1024
 
+bool enable_persistent_connection = true;
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr,"usage: server port\n");
@@ -118,7 +120,23 @@ int main(int argc, char *argv[]) {
 
             vector<char> headers_buffer, body_buffer, leftover, send_buffer;
 
-            while(!timeout) {
+            while(true) {
+
+                // Persistent connection
+                if (enable_persistent_connection && leftover.empty()) {
+                    double wait_time = wait_time_heuristic(2*BACKLOG);
+                    cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;
+                    int status = persist_connection(client_fd, wait_time);
+                    if (status == -1) {
+                        perror("select()");
+                    }
+                    else if (status == 0) {
+                        cout << "***TIMEOUT***" << endl;
+                        close(client_fd);
+                        exit(1);
+                    }
+                }
+
                 // Request related variables
                 cout << "____________________________________________" << endl;
                 int headers_length = 0, content_length = 0;
@@ -177,6 +195,9 @@ int main(int argc, char *argv[]) {
                         remaining_length -= append_body(&body_buffer, receive_buffer, receive_buffer_length, &leftover, remaining_length);
                     }
 
+                    if (request->content_type.substr(0, 4).compare("text") == 0 ) {
+                        log_vector(&body_buffer);
+                    }
                     write_file(&body_buffer, request->path);
                     response = create_post_response("200 OK", request->connection);
                 }
@@ -189,20 +210,7 @@ int main(int argc, char *argv[]) {
                 delete request;
 //                delete response;
 
-                // Persistent connection
-                bool enable_persistent_connection = false;
-                if (enable_persistent_connection) {
-                    double wait_time = wait_time_heuristic(BACKLOG);
-                    cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;
-                    int status = persist_connection(client_fd, wait_time);
-                    if (status == -1) {
-                        perror("select()");
-                    }
-                    else if (status == 0) {
-                        cout << "***TIMEOUT***" << endl;
-                        timeout = true;
-                    }
-                }
+
             }
 
             cout << "***Closing connection***" << endl;
