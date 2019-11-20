@@ -12,42 +12,14 @@
 #include <fstream>
 #include <algorithm>
 #include "utils.h"
+#include <map>
+#include <boost/algorithm/string.hpp>
 #include "server_utils.h"
-
 
 
 using namespace std;
 
-void free_http_request(http_request *request) {
-    free(request->path);
-    free(request->body);
-    free(request);
-}
 
-const char *get_http_request_connection(http_request::Connection connection) {
-    switch(connection) {
-        case http_request::Connection::CLOSED: return "closed";
-        case http_request::Connection::KEEP_ALIVE: return "keep-alive";
-    }
-}
-
-const char *get_http_request_method(http_request::HTTPMethod method) {
-    switch(method) {
-        case http_request::HTTPMethod::POST: return "POST";
-        case http_request::HTTPMethod::GET: return "GET";
-    }
-}
-
-const char *get_http_request_filetype(http_request::FileType fileType) {
-    switch(fileType) {
-        case http_request::FileType::NONE: return "NONE";
-        case http_request::FileType::HTML: return "HTML";
-        case http_request::FileType::TXT: return "TXT";
-        case http_request::FileType::JPG: return "JPG";
-        case http_request::FileType::PNG: return "PNG";
-        case http_request::FileType::GIF: return "GIF";
-    }
-}
 
 void print_client(struct sockaddr * client_sockaddr) {
     // Log client address and port
@@ -85,67 +57,6 @@ int extract_headers(char* buffer, unordered_map<string, string> *headers) {
     return headers_length;
 }
 
-/*
- * Extracts info from the request string to a struct http_request
- */
-int parse_request(char buffer[], int buffer_size, struct http_request **request_ptr) {
-    struct http_request *request = (struct http_request *)malloc(sizeof(http_request));
-
-    int headers_length = 0;
-    unordered_map<string, string> headers;
-    headers_length += extract_headers(buffer, &headers);
-
-    string request_line = headers.find("Request")->second;
-    stringstream stringstream1(request_line);
-    string method, path;
-    stringstream1 >>  method >> path;
-
-    int content_length = 0;
-
-    request->connection = http_request::Connection::CLOSED;
-    if (headers.find("Connection") != headers.end() && headers.find("Connection")->second.compare("keep-alive")==0) {
-        request->connection = http_request::Connection::KEEP_ALIVE;
-    }
-    request->path = (char *)(malloc(path.length()+1));
-    strcpy(request->path, path.c_str());
-
-    if(method.compare("GET") == 0) {
-        request->method = http_request::HTTPMethod::GET;
-    }
-    else {
-        request->method = http_request::HTTPMethod::POST;
-        content_length = stoi(headers.find("Content-Length")->second);
-        request->body = (char *)malloc(buffer_size - headers_length);
-        memcpy(request->body, buffer+headers_length, buffer_size - headers_length);
-    }
-
-    string ext = get_file_extension(path);
-    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
-
-    if (ext.compare("html") == 0) {
-        request->filetype = http_request::FileType::HTML;
-    }
-    else if (ext.compare("txt") == 0) {
-        request->filetype = http_request::FileType::TXT;
-    }
-    else if (ext.compare("jpg") == 0) {
-        request->filetype = http_request::FileType::JPG;
-    }
-    else if (ext.compare("png") == 0) {
-        request->filetype = http_request::FileType::PNG;
-    }
-    else if (ext.compare("gif") == 0) {
-        request->filetype = http_request::FileType::GIF;
-    }
-    else {
-        request->filetype = http_request::FileType::NONE;
-    }
-
-    request->content_length = content_length;
-
-    *request_ptr = request;
-    return headers_length + content_length;
-}
 
 void handle_sigchld(int sig) {
     int saved_errno = errno;
@@ -177,89 +88,6 @@ int read_file(const char* path, char** file_buffer) {
     }
 }
 
-int load_response_success(char *buffer) {
-    strcat(buffer, "HTTP/1.1 200 OK\r\n\r\n");
-    return strlen("HTTP/1.1 200 OK\r\n\r\n");
-}
-
-int load_response_not_found(char *buffer) {
-    char *file_buffer;
-    int file_size;
-    string actual_path = get_actual_path("/not_found.html", SERVER_ROOT);
-    file_size = read_file(actual_path.c_str(), &file_buffer);
-
-    return load_response_file(buffer, file_buffer, file_size, http_request::FileType::HTML, "404 Not Found");
-}
-
-// Returns total size of response
-int load_response_file(char *buffer, char* file_buffer, int file_size, http_request::FileType type, char* status) {
-    int header_length, body_length;
-
-    strcat(buffer, "HTTP/1.1 ");
-    strcat(buffer, status);
-    strcat(buffer, "\r\n");
-    char content_length[100];
-    sprintf(content_length, "%d", file_size);
-    strcat(buffer, "Content-Length: ");
-    strcat(buffer, content_length);
-    strcat(buffer, "\r\n");
-    strcat(buffer, "Connection: keep-alive\r\n");
-    strcat(buffer, "Keep-Alive: timeout=5, max=100\r\n");
-    load_content_type(buffer, type);
-    strcat(buffer, "\r\n");
-    header_length = strlen(buffer);
-
-    memcpy(((char*)buffer) + strlen(buffer), file_buffer, file_size);
-    free(file_buffer);
-
-    body_length = file_size;
-    printf("headers size: %d, body size: %d\n", header_length, file_size);
-    return header_length + body_length;
-}
-
-int load_response_file_headers(char *buffer, int file_size, http_request::FileType type, char* status) {
-    int header_length;
-
-    strcat(buffer, "HTTP/1.1 ");
-    strcat(buffer, status);
-    strcat(buffer, "\r\n");
-    char content_length[100];
-    sprintf(content_length, "%d", file_size);
-    strcat(buffer, "Content-Length: ");
-    strcat(buffer, content_length);
-    strcat(buffer, "\r\n");
-    strcat(buffer, "Connection: keep-alive\r\n");
-    strcat(buffer, "Keep-Alive: timeout=5, max=100\r\n");
-    load_content_type(buffer, type);
-    strcat(buffer, "\r\n");
-    header_length = strlen(buffer);
-
-
-    return header_length;
-}
-
-void load_content_type(char *buffer, http_request::FileType type) {
-    strcat(buffer, "Content-Type: ");
-    switch(type) {
-        case http_request::FileType::HTML:
-            strcat(buffer, "text/html");
-            break;
-        case http_request::FileType::JPG:
-            strcat(buffer, "image/jpg");
-            break;
-        case http_request::FileType::PNG:
-            strcat(buffer, "image/png");
-            break;
-        case http_request::FileType::GIF:
-            strcat(buffer, "image/gif");
-            break;
-        case http_request::FileType::TXT:
-        case http_request::FileType::NONE:
-            strcat(buffer, "text/plain");
-            break;
-    }
-    strcat(buffer, "\r\n");
-}
 
 std::string exec(const char* cmd) {
     FILE* pipe = popen(cmd, "r");
@@ -272,4 +100,256 @@ std::string exec(const char* cmd) {
     }
     pclose(pipe);
     return result;
+}
+
+
+
+
+
+
+
+void log_vector(vector<char> *v) {
+    string s(v->begin(), v->end());
+    cout << s << endl;
+}
+
+struct Request *create_request(map<string, string> headers_map) {
+    struct Request *request = new Request;
+
+    string head = headers_map.find("Head")->second;
+    std::vector<std::string> v;
+    boost::algorithm::split(v, head, boost::algorithm::is_space());
+    request->method = v[0];
+    request->path = v[1];
+
+    request->connection = "keep-alive";
+    if (headers_map.find("Connection") != headers_map.end()) {
+        request->connection = boost::algorithm::to_lower_copy(headers_map.find("Connection")->second);
+    }
+
+    // Headers specific to POST requests
+    if (request->method.compare("POST") == 0) {
+        request->content_length = stoi(headers_map.find("Content-Length")->second);
+        request->content_type = headers_map.find("Content-Type")->second;
+    }
+
+    return request;
+}
+
+string get_content_type(string extension) {
+    if (extension.compare("txt") == 0) {
+        return "text/plain";
+    }
+    if (extension.compare("html") == 0) {
+        return "text/html";
+    }
+    if (extension.compare("jpg") == 0) {
+        return "image/jpg";
+    }
+    if (extension.compare("png") == 0) {
+        return "image/png";
+    }
+    if (extension.compare("gif") == 0) {
+        return "image/gif";
+    }
+    if (extension.compare("ico") == 0) {
+        return "image/x-icon";
+    }
+    if (extension.compare("pdf") == 0) {
+        return "application/pdf";
+    }
+    return "text/plain";
+}
+
+struct Response *create_get_response(string status, string connection, string path, char* file_buffer, int file_size) {
+    struct Response *response = new Response;
+    response->status = status;
+    response->connection = connection;
+    response->content_length = file_size;
+    response->body = file_buffer;
+
+    std::vector<std::string> v;
+    boost::algorithm::split(v, path, boost::is_any_of("."));
+    if (v.size() == 1) {
+        response->content_type = "text/plain";
+    }
+    else {
+        string extension = boost::algorithm::to_lower_copy(v[1]);
+        response->content_type = get_content_type(extension);
+    }
+
+    return response;
+}
+
+struct Response *create_post_response(string status, string connection) {
+    struct Response *response = new Response;
+    response->status = status;
+    response->connection = connection;
+    response->content_length = 0;
+    response->body = NULL;
+    response->content_type = nullptr;
+
+    return response;
+}
+
+vector<char>::iterator find_crlf2(vector<char> *buffer) {
+    const char *headers_delim = "\r\n\r\n";
+    auto it = search(buffer->begin(), buffer->end(), headers_delim, headers_delim + strlen(headers_delim));
+
+    return it;
+}
+
+void extract_headers_from_leftover(vector<char> *headers_buffer, vector<char> *leftover) {
+    auto it = find_crlf2(leftover);
+    headers_buffer->reserve(it - leftover->begin());
+    copy(leftover->begin(), it, back_inserter(*headers_buffer));
+
+    leftover->erase(leftover->begin(), it);
+}
+
+bool headers_complete(vector<char> *headers_buffer) {
+    auto it = find_crlf2(headers_buffer);
+    if (it == headers_buffer->end()) {      // delimiter not found
+        return false;
+    }
+    return true;
+
+}
+
+void append_headers(vector<char> *headers_buffer, char *receive_buffer, int received_bytes, vector<char> *leftover) {
+    // Find iterator on crlf2
+    vector<char> receive_vector(receive_buffer, receive_buffer + received_bytes);
+    auto it = find_crlf2(&receive_vector);
+    it = min(it + 4, receive_vector.end());
+
+    // Copy character upto crlf2 to headers buffer
+    headers_buffer->reserve(headers_buffer->size() + distance(receive_vector.begin(), it));
+    headers_buffer->insert(headers_buffer->end(), receive_vector.begin(), it);
+
+    // Copy remaining characters if any to leftover
+    leftover->reserve(distance(it, receive_vector.end()));
+    leftover->insert(leftover->begin(), it, receive_vector.end());
+}
+
+void remove_headers_leftover(vector<char> *headers_buffer, vector<char> *leftover) {
+    auto it = find_crlf2(headers_buffer) + 4;
+
+    leftover->resize(leftover->size() + distance(it, headers_buffer->end()));
+    leftover->insert(leftover->begin(), it, headers_buffer->end());
+}
+
+map<string, string> process_headers(vector<char> *headers_buffer) {
+    map<string, string> headers_data;
+    string header;
+    stringstream headers_stream(string(headers_buffer->begin(), headers_buffer->end()));
+
+    getline(headers_stream, header);
+    headers_data.insert(make_pair("Head", boost::algorithm::trim_copy(header)));
+
+    string::size_type index;
+    while (getline(headers_stream, header) && header != "\r") {
+        index = header.find(':', 0);
+        if(index != std::string::npos) {
+            headers_data.insert(std::make_pair(
+                    boost::algorithm::trim_copy(header.substr(0, index)),
+                    boost::algorithm::trim_copy(header.substr(index + 1))
+            ));
+        }
+    }
+    return headers_data;
+}
+
+int extract_body_from_leftover(vector<char> *body_buffer, vector<char> *leftover, int remaining_length) {
+    auto start = leftover->begin();
+    auto end = min(start + remaining_length, leftover->end());
+
+    body_buffer->reserve(distance(start, end));
+    copy(start, end, back_inserter(*body_buffer));
+
+    leftover->erase(start, end);
+}
+
+int append_body(vector<char> *body_buffer, char *receive_buffer, int received_bytes,
+        vector<char> *leftover, int remaining_length) {
+
+    vector<char> receive_vector(receive_buffer, receive_buffer + received_bytes);
+
+    auto start = receive_vector.begin();
+    auto end = min(start + remaining_length, receive_vector.end());
+
+    // Copy character upto crlf2 to headers buffer
+    body_buffer->reserve(body_buffer->size() + distance(start, end));
+    body_buffer->insert(body_buffer->end(), start, end);
+
+    // Copy remaining characters if any to leftover
+    leftover->reserve(distance(end, receive_vector.end()));
+    leftover->insert(leftover->begin(), end, receive_vector.end());
+
+    return distance(start, end);
+}
+
+void populate_send_buffer(vector<char> *send_buffer, string method, struct Response response) {
+    string headers = "";
+    headers += "HTTP/1.1 " + response.status + "\r\n";
+    headers += "Connection: " + response.connection + "\r\n";
+
+    if (method.compare("GET") == 0) {
+        headers += "Content-Length: " + to_string(response.content_length) + "\r\n";
+        headers += "Content-Type: " + response.content_type + "\r\n";
+    }
+    headers += "\r\n";
+    int headers_length = headers.size();
+    send_buffer->reserve(headers_length);
+    copy(headers.begin(), headers.end(), back_inserter(*send_buffer));
+
+    if (method.compare("GET") == 0) {
+        send_buffer->reserve(headers_length + response.content_length);
+        send_buffer->insert(send_buffer->end(), response.body, response.body + response.content_length);
+    }
+
+    cout << "response: headers length = " << headers.size() << "bytes" << endl;
+    cout << "response: " << endl;
+    if (response.content_type.substr(0, 4).compare("text") == 0) {
+        log_vector(send_buffer);
+    }
+    else {
+        cout << headers;
+    }
+}
+
+string get_actual_path(string path) {
+    string actual_path = SERVER_ROOT_DIR;
+    actual_path += path;
+    return actual_path;
+}
+
+int load_file(string path, char **buffer) {
+    ifstream file;
+    file.open(get_actual_path(path), ios_base::binary);
+
+    file.seekg(0, ios::end);
+    int length = file.tellg();
+    file.seekg(0, ios::beg);
+
+    if (length == -1)
+        return -1;
+
+    char* res = (char *)malloc(length);
+    file.read(res, length);
+
+    *buffer = res;
+    return length;
+}
+
+void write_file(vector<char> *buffer, string path) {
+    string actual_path = get_actual_path(path);
+    char buffer_arr[buffer->size()];
+
+    for (int i = 0; i < buffer->size(); i++) {
+        buffer_arr[i] = buffer->at(i);
+    }
+
+    ofstream file(actual_path);
+    file.write(buffer_arr, buffer->size());
+    file.close();
 }

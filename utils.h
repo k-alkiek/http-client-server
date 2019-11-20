@@ -5,11 +5,14 @@
 #ifndef SOCKET_PROG_UTILS_H
 #define SOCKET_PROG_UTILS_H
 
-#define SERVER_ROOT "./server-root"
+
+
+#include <vector>
 
 using namespace std;
 
 int send_all(int socket, const void *data, int data_size);
+int send_all(int socket, vector<char> *send_buffer);
 
 void print_chars(char *buffer, int length);
 void extract_body_to_file(char* buffer, int content_length, string path);

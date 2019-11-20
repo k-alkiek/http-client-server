@@ -8,6 +8,9 @@
 #include <libnet.h>
 #include <unordered_map>
 #include <sstream>
+#include <vector>
+#include <map>
+#include <fstream>
 
 #include "server_utils.h"
 #include "utils.h"
@@ -23,11 +26,6 @@ int main(int argc, char *argv[]) {
     }
 
     char *port = argv[1];
-
-    char buffer[BUFFER_SIZE];
-    char send_buffer[BUFFER_SIZE];
-    int received_bytes = -1;
-    int bytes_sent = -1;
 
     int yes = 1;
     int socket_fd, client_fd;
@@ -111,12 +109,85 @@ int main(int argc, char *argv[]) {
         print_client((struct sockaddr *) &client_sockaddr);
 
         if (fork() == 0) { // This is the child process
-            while(true) {
+
+            // Initialize connection related variables
+            bool timeout = false;
+            char receive_buffer[BUFFER_SIZE];
+            int receive_buffer_length = 0;
 
 
+            vector<char> headers_buffer, body_buffer, leftover, send_buffer;
+
+            while(!timeout) {
+                // Request related variables
+                int headers_length = 0, content_length = 0;
+                string method, path, connection, content_type;
+
+                headers_buffer.clear();
+                send_buffer.clear();
+                body_buffer.clear();
+
+                // Initialize headers_buffer from leftover
+                if(!leftover.empty()) {
+                    extract_headers_from_leftover(&headers_buffer, &leftover);
+                    cout << "extracted some headers: " << headers_buffer.size() << "bytes" << endl;
+                }
+
+                // If headers are not complete, continue receiving
+                while(!headers_complete(&headers_buffer)) {
+                    receive_buffer_length = recv(client_fd, receive_buffer, BUFFER_SIZE, 0);
+                    cout << "received " << receive_buffer_length << " bytes" << endl;
+                    append_headers(&headers_buffer, receive_buffer, receive_buffer_length, &leftover);
+                }
+                remove_headers_leftover(&headers_buffer, &leftover);     // Remove extra bytes from header to leftover
+                headers_length = headers_buffer.size();
+                cout << "headers received: " << headers_length << " bytes" << endl;
+                log_vector(&headers_buffer);
+
+                // Process headers
+                map<string, string> headers_map = process_headers(&headers_buffer);
+
+                // Prepare response
+                struct Request *request = create_request(headers_map);
+                struct Response *response;
+                char *file_buffer;
+
+                if (request->method.compare("GET") == 0) {
+                    int file_size = load_file(request->path, &file_buffer);
+
+                    if (file_size == -1) {
+                        file_size = load_file("/not_found.html", &file_buffer);
+                        response = create_get_response("404 Not Found", request->connection, "/not_found.html", file_buffer, file_size);
+                    }
+                    else {
+                        response = create_get_response("200 OK", request->connection, request->path, file_buffer, file_size);
+                    }
+                }
+                else if (request->method.compare("POST") == 0) {
+                    int remaining_length = request->content_length;
+                    remaining_length -= extract_body_from_leftover(&body_buffer, &leftover, remaining_length);
+                    while (remaining_length > 0) {
+                        receive_buffer_length = recv(client_fd, receive_buffer, BUFFER_SIZE, 0);
+                        remaining_length -= append_body(&body_buffer, receive_buffer, receive_buffer_length, &leftover, remaining_length);
+                    }
+
+                    write_file(&body_buffer, request->path);
+                    response = create_post_response("200 OK", request->connection);
+                }
+
+                // Send response
+                populate_send_buffer(&send_buffer, request->method, *response);
+                send_all(client_fd, &send_buffer);
+
+
+                delete file_buffer;
+                delete request;
+                delete response;
+
+                timeout = true;
             }
 
-            printf("byee");
+            printf("Closing connection");
             close(client_fd);
             exit(0);
         }
