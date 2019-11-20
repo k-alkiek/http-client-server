@@ -12,16 +12,6 @@
 
 using namespace std;
 
-void print_client(struct sockaddr *);
-int extract_headers(char* buffer, unordered_map<string, string> *headers);
-
-void handle_sigchld(int sig);
-int read_file(const char* path, char** file_buffer);
-
-
-std::string exec(const char* cmd);
-
-
 
 struct Request {
     string method;
@@ -65,6 +55,19 @@ string get_actual_path(string path);
 int load_file(string path, char **buffer);
 void write_file(vector<char> *buffer, string path);
 
-int persist_connection(int socket_fd);
+double wait_time_heuristic(int max_connections);
+int persist_connection(int socket_fd, double wait_time);
+
+void print_client(struct sockaddr *);
+int extract_headers(char* buffer, unordered_map<string, string> *headers);
+
+void handle_sigchld(int sig);
+int read_file(const char* path, char** file_buffer);
+
+
+std::string exec(const char* cmd);
+
+
+
 
 #endif //SOCKET_PROG_SERVER_UTILS_H

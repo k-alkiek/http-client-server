@@ -184,8 +184,9 @@ int main(int argc, char *argv[]) {
                 delete response;
 
                 // Persistent connection
-                cout << "***WAIT***" << endl;
-                int status = persist_connection(client_fd);
+                double wait_time = wait_time_heuristic(BACKLOG);
+                cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;
+                int status = persist_connection(client_fd, wait_time);
                 if (status == -1) {
                     perror("select()");
                 }

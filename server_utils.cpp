@@ -14,97 +14,11 @@
 #include "utils.h"
 #include <map>
 #include <boost/algorithm/string.hpp>
+#include <math.h>
 #include "server_utils.h"
 
 
 using namespace std;
-
-
-
-void print_client(struct sockaddr * client_sockaddr) {
-    // Log client address and port
-    char client_ip4[INET6_ADDRSTRLEN];
-    char client_ip6[INET6_ADDRSTRLEN];
-
-    if (client_sockaddr->sa_family == AF_INET) { // IPv4
-        struct sockaddr_in *sock_addr = (struct sockaddr_in *)client_sockaddr;
-        inet_ntop(AF_INET, &sock_addr->sin_addr, client_ip4, INET_ADDRSTRLEN);
-        printf("\nClient connected from IPv4: %s port %d\n", client_ip4, ntohs(sock_addr->sin_port));
-    } else { // IPv6
-        struct sockaddr_in6 *sock_addr = (struct sockaddr_in6 *)client_sockaddr;
-        inet_ntop(AF_INET6, &sock_addr->sin6_addr, client_ip6, INET6_ADDRSTRLEN);
-        printf("\nClient connected from IPv6: %s port %d\n", client_ip6, ntohs(sock_addr->sin6_port));
-    }
-}
-
-int extract_headers(char* buffer, unordered_map<string, string> *headers) {
-    char *headers_end = strstr(buffer, "\r\n\r\n");
-    *headers_end = '\0';
-    int headers_length = strlen(buffer)+4;
-    char* token = strtok(buffer, "\r\n");
-    headers->insert(make_pair("Request", string(token)));
-    token = strtok(NULL, "\r\n");
-
-    while (token != NULL) {
-        string token_str(token);
-        int sep_pos = token_str.find(':');
-        string field_name = token_str.substr(0, sep_pos);
-        string field_value = token_str.substr(sep_pos+1);
-        trim((string &) field_value);
-        headers->insert(make_pair(field_name, field_value));
-        token = strtok(NULL, "\r\n");
-    }
-    return headers_length;
-}
-
-
-void handle_sigchld(int sig) {
-    int saved_errno = errno;
-    while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
-    errno = saved_errno;
-}
-
-int read_file(const char* path, char** file_buffer) {
-    char *buffer = 0;
-    long length;
-    FILE * f = fopen (path, "rb");
-
-    if (f) {
-        fseek (f, 0, SEEK_END);
-        length = ftell (f);
-        fseek (f, 0, SEEK_SET);
-        buffer = (char *)malloc(length);
-        if (buffer) {
-            fread (buffer, 1, length, f);
-        }
-        fclose (f);
-
-//        printf("\n %s\n length=%d\n", buffer, length);
-        *file_buffer = buffer;
-        return length;
-    }
-    else {
-        return -1;
-    }
-}
-
-
-std::string exec(const char* cmd) {
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) return "ERROR";
-    char buffer[128];
-    std::string result = "";
-    while(!feof(pipe)) {
-        if(fgets(buffer, 128, pipe) != NULL)
-            result += buffer;
-    }
-    pclose(pipe);
-    return result;
-}
-
-
-
-
 
 
 
@@ -270,7 +184,7 @@ int extract_body_from_leftover(vector<char> *body_buffer, vector<char> *leftover
 }
 
 int append_body(vector<char> *body_buffer, char *receive_buffer, int received_bytes,
-        vector<char> *leftover, int remaining_length) {
+                vector<char> *leftover, int remaining_length) {
 
     vector<char> receive_vector(receive_buffer, receive_buffer + received_bytes);
 
@@ -354,7 +268,17 @@ void write_file(vector<char> *buffer, string path) {
     file.close();
 }
 
-int persist_connection(int socket_fd) {
+double wait_time_heuristic(int max_connections) {
+    char cmd[100];
+    sprintf(cmd, "pgrep -P %d | wc -l\0", getppid());
+
+    int n_processes = stoi(exec(cmd));
+    double time = 10/n_processes;
+    return time;
+}
+
+int persist_connection(int socket_fd, double wait_time) {
+
     fd_set rfds;
     struct timeval tv;
     int retval;
@@ -364,8 +288,90 @@ int persist_connection(int socket_fd) {
     FD_SET(socket_fd, &rfds);
 
     /* Wait up to five seconds. */
-    tv.tv_sec = 5;
-    tv.tv_usec = 0;
+    tv.tv_sec = floor(wait_time);
+    tv.tv_usec = (int)(wait_time - floor(wait_time))*1000000;
 
     return select(socket_fd+1, &rfds, NULL, NULL, &tv);
+}
+
+
+void print_client(struct sockaddr * client_sockaddr) {
+    // Log client address and port
+    char client_ip4[INET6_ADDRSTRLEN];
+    char client_ip6[INET6_ADDRSTRLEN];
+
+    if (client_sockaddr->sa_family == AF_INET) { // IPv4
+        struct sockaddr_in *sock_addr = (struct sockaddr_in *)client_sockaddr;
+        inet_ntop(AF_INET, &sock_addr->sin_addr, client_ip4, INET_ADDRSTRLEN);
+        printf("\nClient connected from IPv4: %s port %d\n", client_ip4, ntohs(sock_addr->sin_port));
+    } else { // IPv6
+        struct sockaddr_in6 *sock_addr = (struct sockaddr_in6 *)client_sockaddr;
+        inet_ntop(AF_INET6, &sock_addr->sin6_addr, client_ip6, INET6_ADDRSTRLEN);
+        printf("\nClient connected from IPv6: %s port %d\n", client_ip6, ntohs(sock_addr->sin6_port));
+    }
+}
+
+int extract_headers(char* buffer, unordered_map<string, string> *headers) {
+    char *headers_end = strstr(buffer, "\r\n\r\n");
+    *headers_end = '\0';
+    int headers_length = strlen(buffer)+4;
+    char* token = strtok(buffer, "\r\n");
+    headers->insert(make_pair("Request", string(token)));
+    token = strtok(NULL, "\r\n");
+
+    while (token != NULL) {
+        string token_str(token);
+        int sep_pos = token_str.find(':');
+        string field_name = token_str.substr(0, sep_pos);
+        string field_value = token_str.substr(sep_pos+1);
+        trim((string &) field_value);
+        headers->insert(make_pair(field_name, field_value));
+        token = strtok(NULL, "\r\n");
+    }
+    return headers_length;
+}
+
+
+void handle_sigchld(int sig) {
+    int saved_errno = errno;
+    while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
+    errno = saved_errno;
+}
+
+int read_file(const char* path, char** file_buffer) {
+    char *buffer = 0;
+    long length;
+    FILE * f = fopen (path, "rb");
+
+    if (f) {
+        fseek (f, 0, SEEK_END);
+        length = ftell (f);
+        fseek (f, 0, SEEK_SET);
+        buffer = (char *)malloc(length);
+        if (buffer) {
+            fread (buffer, 1, length, f);
+        }
+        fclose (f);
+
+//        printf("\n %s\n length=%d\n", buffer, length);
+        *file_buffer = buffer;
+        return length;
+    }
+    else {
+        return -1;
+    }
+}
+
+
+std::string exec(const char* cmd) {
+    FILE* pipe = popen(cmd, "r");
+    if (!pipe) return "ERROR";
+    char buffer[128];
+    std::string result = "";
+    while(!feof(pipe)) {
+        if(fgets(buffer, 128, pipe) != NULL)
+            result += buffer;
+    }
+    pclose(pipe);
+    return result;
 }
