@@ -156,7 +156,7 @@ int main(int argc, char *argv[]) {
                 // Prepare response
                 struct Request *request = create_request(headers_map);
                 struct Response *response;
-                char *file_buffer;
+                char *file_buffer = NULL;
 
                 if (request->method.compare("GET") == 0) {
                     int file_size = read_file(request->path, &file_buffer);
@@ -190,7 +190,7 @@ int main(int argc, char *argv[]) {
 //                delete response;
 
                 // Persistent connection
-                bool enable_persistent_connection = true;
+                bool enable_persistent_connection = false;
                 if (enable_persistent_connection) {
                     double wait_time = wait_time_heuristic(BACKLOG);
                     cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;

@@ -140,7 +140,6 @@ int main(int argc, char *argv[])
             // Process headers
             map<string, string> headers_map = process_headers(&headers_buffer);
 
-            struct Response *response;
             if (pipeline.front().first.compare("GET") == 0) {
                 content_length = stoi(headers_map.find("Content-Length")->second);
                 int remaining_length = content_length;
@@ -151,7 +150,7 @@ int main(int argc, char *argv[])
                     remaining_length -= append_body(&body_buffer, receive_buffer, receive_buffer_length, &leftover, remaining_length);
                 }
 
-                if (response->content_type.substr(0, 4).compare("text") == 0)
+                if (headers_map.find("Content-Type")->second.substr(0, 4).compare("text") == 0)
                     log_vector(&body_buffer);
                 write_file(&body_buffer, get_file_name(pipeline.front().second));
             }
