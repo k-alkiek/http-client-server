@@ -65,4 +65,6 @@ string get_actual_path(string path);
 int load_file(string path, char **buffer);
 void write_file(vector<char> *buffer, string path);
 
+int persist_connection(int socket_fd);
+
 #endif //SOCKET_PROG_SERVER_UTILS_H

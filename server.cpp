@@ -179,15 +179,23 @@ int main(int argc, char *argv[]) {
                 populate_send_buffer(&send_buffer, request->method, *response);
                 send_all(client_fd, &send_buffer);
 
-
                 delete file_buffer;
                 delete request;
                 delete response;
 
-                timeout = true;
+                // Persistent connection
+                cout << "***WAIT***" << endl;
+                int status = persist_connection(client_fd);
+                if (status == -1) {
+                    perror("select()");
+                }
+                else if (status == 0) {
+                    cout << "***TIMEOUT***" << endl;
+                    timeout = true;
+                }
             }
 
-            printf("Closing connection");
+            cout << "***Closing connection***" << endl;
             close(client_fd);
             exit(0);
         }

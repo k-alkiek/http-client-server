@@ -353,3 +353,19 @@ void write_file(vector<char> *buffer, string path) {
     file.write(buffer_arr, buffer->size());
     file.close();
 }
+
+int persist_connection(int socket_fd) {
+    fd_set rfds;
+    struct timeval tv;
+    int retval;
+
+    /* Watch stdin (fd 0) to see when it has input. */
+    FD_ZERO(&rfds);
+    FD_SET(socket_fd, &rfds);
+
+    /* Wait up to five seconds. */
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+
+    return select(socket_fd+1, &rfds, NULL, NULL, &tv);
+}
