@@ -9,24 +9,22 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <map>
 #include <unordered_map>
 
-#define CLIENT_ROOT "./client-root"
+#define CLIENT_ROOT_DIR "./client-root"
 
 using namespace std;
 
 vector<pair<string, string>> read_commands(string path);
-int load_get_request(char* buffer, string path);
-int load_post_request_headers(char* buffer, string path, int content_length);
-int load_post_request(char* buffer, string path);
 string get_file_name(string path);
 string get_file_extension(string path);
-int read_file(const char* path, char** file_buffer);
 
-int extract_headers(char* buffer, unordered_map<string, string> *headers);
-void log_body(char* buffer, int content_length);
-char* construct_body(vector<pair<char*, int>> body, int content_length);
-int handle_get_response_body(char* body, int content_length, string path);
-int handle_get_response(char* buffer, string path, int extracted_bytes);
+struct Request *create_request(string method, string path);
+void append_send_buffer(vector<char> *send_buffer, struct Request *request);
+
+string get_actual_path(string path);
+int read_file(string path, char **buffer);
+void write_file(vector<char> *buffer, string path);
 
 #endif //SOCKET_PROG_CLIENT_UTILS_H

@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
 
             while(!timeout) {
                 // Request related variables
+                cout << "____________________________________________" << endl;
                 int headers_length = 0, content_length = 0;
                 string method, path, connection, content_type;
 
@@ -136,6 +137,11 @@ int main(int argc, char *argv[]) {
                 // If headers are not complete, continue receiving
                 while(!headers_complete(&headers_buffer)) {
                     receive_buffer_length = recv(client_fd, receive_buffer, BUFFER_SIZE, 0);
+                    if (receive_buffer_length == 0 ) {
+                        cout << "*** Connection closed from client ***" << endl;
+                        close(client_fd);
+                        exit(1);
+                    }
                     cout << "received " << receive_buffer_length << " bytes" << endl;
                     append_headers(&headers_buffer, receive_buffer, receive_buffer_length, &leftover);
                 }
@@ -153,10 +159,10 @@ int main(int argc, char *argv[]) {
                 char *file_buffer;
 
                 if (request->method.compare("GET") == 0) {
-                    int file_size = load_file(request->path, &file_buffer);
+                    int file_size = read_file(request->path, &file_buffer);
 
                     if (file_size == -1) {
-                        file_size = load_file("/not_found.html", &file_buffer);
+                        file_size = read_file("/not_found.html", &file_buffer);
                         response = create_get_response("404 Not Found", request->connection, "/not_found.html", file_buffer, file_size);
                     }
                     else {
@@ -181,18 +187,21 @@ int main(int argc, char *argv[]) {
 
                 delete file_buffer;
                 delete request;
-                delete response;
+//                delete response;
 
                 // Persistent connection
-                double wait_time = wait_time_heuristic(BACKLOG);
-                cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;
-                int status = persist_connection(client_fd, wait_time);
-                if (status == -1) {
-                    perror("select()");
-                }
-                else if (status == 0) {
-                    cout << "***TIMEOUT***" << endl;
-                    timeout = true;
+                bool enable_persistent_connection = true;
+                if (enable_persistent_connection) {
+                    double wait_time = wait_time_heuristic(BACKLOG);
+                    cout << "***WAIT FOR " << wait_time << " seconds" << "***" << endl;
+                    int status = persist_connection(client_fd, wait_time);
+                    if (status == -1) {
+                        perror("select()");
+                    }
+                    else if (status == 0) {
+                        cout << "***TIMEOUT***" << endl;
+                        timeout = true;
+                    }
                 }
             }
 

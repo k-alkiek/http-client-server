@@ -34,29 +34,6 @@ vector<pair<string, string>> read_commands(std::string path) {
     return commands;
 }
 
-int read_file(const char* path, char** file_buffer) {
-    char *buffer = 0;
-    long length;
-    FILE * f = fopen (path, "rb");
-
-    if (f) {
-        fseek (f, 0, SEEK_END);
-        length = ftell (f);
-        fseek (f, 0, SEEK_SET);
-        buffer = (char *)malloc(length);
-        if (buffer) {
-            fread (buffer, 1, length, f);
-        }
-        fclose (f);
-
-//        printf("\n %s\n length=%d\n", buffer, length);
-        *file_buffer = buffer;
-        return length;
-    }
-    else {
-        return -1;
-    }
-}
 
 string get_file_name(string path) {
     char sep = '/';
@@ -67,109 +44,94 @@ string get_file_name(string path) {
     return "";
 }
 
+struct Request *create_request(string method, string path) {
+    struct Request *request = new Request;
+    request->method = method;
+    request->path = path;
+    request->connection = "keep-alive";
 
-// Returns number of bytes used by the request
-int load_get_request(char* buffer, string path) {
-    string request = "GET " + path + " HTML/1.1\r\n";
-    request += "Connection: keep-alive\r\n";
-    request += "\r\n";
-    memcpy(buffer, request.c_str(), request.length());
-
-    return request.length();
+    if (method.compare("POST") == 0) {
+        char *file_buffer;
+        request->content_length = read_file(path, &file_buffer);
+        request->body = file_buffer;
+        string extension = get_file_extension(path);
+        request->content_type = get_content_type(extension);
+    }
+    return request;
 }
 
-int load_post_request_headers(char* buffer, string path, int content_length) {
-    string dest_path = "/" + get_file_name(path);
-    string headers = "POST " + dest_path + " HTML/1.1\r\n";
-    headers += "Content-Type: " + get_file_extension(path) + "\r\n";
-    headers += "Content-Length: " + to_string(content_length) + "\r\n";
-    headers += "Connection: keep-alive\r\n";
+
+void append_send_buffer(vector<char> *send_buffer, struct Request *request) {
+    string headers = "";
+    headers += request->method + " " + request->path + " HTTP/1.1\r\n";
+    headers += "Connection: " + request->connection + "\r\n";
+
+    if (request->method.compare("POST") == 0) {
+        headers += "Content-Length: " + to_string(request->content_length) + "\r\n";
+        headers += "Content-Type: " + request->content_type + "\r\n";
+    }
     headers += "\r\n";
-    memcpy(buffer, headers.c_str(), headers.length());
+    int headers_length = headers.size();
+    send_buffer->reserve(headers_length);
+    copy(headers.begin(), headers.end(), back_inserter(*send_buffer));
 
-    return headers.length();
+    cout << headers << endl;
+
+    if (request->method.compare("POST") == 0) {
+        char *file_buffer;
+        int file_size = read_file(request->path, &file_buffer);
+        if (file_size == -1) {
+            cerr << "File: " << request->path << " not found" << endl;
+        }
+
+        if (request->content_type.substr(0, 4).compare("text") == 0) {
+            print_chars(file_buffer, file_size);
+        }
+        send_buffer->reserve(headers_length + file_size);
+        send_buffer->insert(send_buffer->end(), file_buffer, file_buffer + file_size);
+        free(file_buffer);
+    }
+
 }
 
-int load_post_request(char* buffer, string path) {
-    char* file_buffer;
-    string actual_path(CLIENT_ROOT);
+
+string get_actual_path(string path) {
+    string actual_path = CLIENT_ROOT_DIR;
+    if (path.at(0) != '/')
+        actual_path += "/";
     actual_path += path;
-    int content_length = read_file(actual_path.c_str(), &file_buffer);
-
-    // TODO
-    string dest_path = "/" + get_file_name(path);
-    string headers = "POST " + dest_path + " HTML/1.1\r\n";
-    headers += "Content-Type: " + get_file_extension(path) + "\r\n";
-    headers += "Content-Length: " + to_string(content_length) + "\r\n";
-    headers += "Connection: keep-alive\r\n";
-    headers += "\r\n";
-    memcpy(buffer, headers.c_str(), headers.length());
-    memcpy(buffer + headers.length(), file_buffer, content_length);
-
-    return headers.length() + content_length;
+    return actual_path;
 }
 
-int extract_headers(char* buffer, unordered_map<string, string> *headers) {
-    char *headers_end = strstr(buffer, "\r\n\r\n");
-    *headers_end = '\0';
-    int headers_length = strlen(buffer)+4;
-    char* token = strtok(buffer, "\r\n");
-    headers->insert(make_pair("Status", string(token)));
-    token = strtok(NULL, "\r\n");
 
-    while (token != NULL) {
-        string token_str(token);
-        int sep_pos = token_str.find(':');
-        string field_name = token_str.substr(0, sep_pos);
-        string field_value = token_str.substr(sep_pos+1);
-        trim((string &) field_value);
-        headers->insert(make_pair(field_name, field_value));
-        token = strtok(NULL, "\r\n");
+int read_file(string path, char **buffer) {
+    ifstream file;
+    file.open(get_actual_path(path), ios_base::binary);
+
+    file.seekg(0, ios::end);
+    int length = file.tellg();
+    file.seekg(0, ios::beg);
+
+    if (length == -1)
+        return -1;
+
+    char* res = (char *)malloc(length);
+    file.read(res, length);
+
+    *buffer = res;
+    return length;
+}
+
+void write_file(vector<char> *buffer, string path) {
+    string actual_path = get_actual_path(path);
+    char* buffer_arr = (char *)malloc(buffer->size());
+
+    for (int i = 0; i < buffer->size(); i++) {
+        buffer_arr[i] = buffer->at(i);
     }
-    return headers_length;
-}
 
-void log_body(char* buffer, int content_length) {
-    char* end = buffer + content_length;
-    for (char* c = buffer; c != end; c++) {
-        printf("%c", *c);
-    }
-    printf("\n\n");
-}
-
-char* construct_body(vector<pair<char*, int>> body, int content_length) {
-    char *full_body = (char *)malloc(content_length);
-    int copied = 0;
-    for(auto it = body.begin(); it != body.end(); ++it) {
-        memcpy(full_body+copied, it->first, it->second);
-        copied += it->second;
-//        for(char *c = it->first; c - it->first < it->second; c++) {
-//            printf("%c", *c);
-//        }
-        free(it->first);
-
-    }
-    return full_body;
-}
-
-int handle_get_response_body(char* body, int content_length, string path) {
-    string dest_path = CLIENT_ROOT;
-    dest_path += "/" + get_file_name(path);
-    extract_body_to_file(body, content_length, dest_path);
-    return 0;
-}
-
-int handle_get_response(char* buffer, string path, int extracted_bytes) {
-    unordered_map<string, string> headers;
-    extracted_bytes += extract_headers(buffer+extracted_bytes, &headers);
-//    cout << "received: " << headers.find("Status")->second << endl;
-    int content_length = stoi(headers.find("Content-Length")->second);
-    if (headers.find("Content-Type")->second.substr(0, 4).compare("text") == 0) {
-//        log_body(buffer+extracted_bytes, content_length);
-    }
-    string dest_path = CLIENT_ROOT;
-    dest_path += "/" + get_file_name(path);
-    extract_body_to_file(buffer+extracted_bytes, content_length, dest_path);
-    extracted_bytes += content_length;
-    return extracted_bytes;
+    ofstream file(actual_path);
+    file.write(buffer_arr, buffer->size());
+    file.close();
+    free(buffer_arr);
 }

@@ -13,11 +13,13 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <queue>
 #include "client_utils.h"
 #include "utils.h"
 
 #define COMMANDS_FILE_PATH "./client_requests"
 #define COMMAND_MAX_LENGTH 256
+#define PIPELINE_SIZE 3
 
 #define BUFFER_SIZE 1024*1024
 
@@ -40,8 +42,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    char recv_buffer[BUFFER_SIZE];
-    char send_buffer[BUFFER_SIZE];
     int server_socket_fd;
 
     /* Get address info */
@@ -82,12 +82,85 @@ int main(int argc, char *argv[])
     printf("Connected to server\n");
     freeaddrinfo(res); // free the linked list
 
+
+    // Initialize buffers and variables
+    char receive_buffer[BUFFER_SIZE];
+    int receive_buffer_length = 0;
+    vector<char> headers_buffer, body_buffer, leftover, send_buffer;
+    queue<pair<string, string>> pipeline;
+
     /* read commands file */
     vector<pair<string, string>> commands = read_commands(COMMANDS_FILE_PATH);
+    auto command = commands.begin();
+
+    while (command != commands.end()) {
+        leftover.clear();
+        send_buffer.clear();
+
+        cout << "------------pipelining " << PIPELINE_SIZE << " requests---------------" << endl;
+        // Pipeline and enqueue requests
+        for (int i = 0; i < PIPELINE_SIZE && command != commands.end(); ++i, ++command) {
+            struct Request *request = create_request(command->first, command->second);
+            append_send_buffer(&send_buffer, request);
+            pipeline.push(*command);
+        }
+
+        // Send pipelined requests
+        send_all(server_socket_fd, &send_buffer);
+
+        cout << "------------waiting for pipelined requests responses ---------------" << endl;
+        // Receive responses
+        while (!pipeline.empty()) {
+            headers_buffer.clear();
+            body_buffer.clear();
+            int headers_length = 0, content_length = 0;
 
 
-    for(auto it = commands.begin(); it != commands.end(); ++it) {
-        
+            // Initialize headers_buffer from leftover
+            if(!leftover.empty()) {
+                extract_headers_from_leftover(&headers_buffer, &leftover);
+                cout << "extracted some headers: " << headers_buffer.size() << "bytes" << endl;
+            }
+
+            // If headers are not complete, continue receiving
+            while(!headers_complete(&headers_buffer)) {
+                receive_buffer_length = recv(server_socket_fd, receive_buffer, BUFFER_SIZE, 0);
+                if (receive_buffer_length == 0 ) {
+                    close(server_socket_fd);
+                    cout << "*** Connection closed from client ***" << endl;
+                }
+                cout << "received " << receive_buffer_length << " bytes" << endl;
+                append_headers(&headers_buffer, receive_buffer, receive_buffer_length, &leftover);
+            }
+            remove_headers_leftover(&headers_buffer, &leftover);     // Remove extra bytes from header to leftover
+            headers_length = headers_buffer.size();
+            cout << "headers received: " << headers_length << " bytes" << endl;
+            log_vector(&headers_buffer);
+
+            // Process headers
+            map<string, string> headers_map = process_headers(&headers_buffer);
+
+            struct Response *response;
+            if (pipeline.front().first.compare("GET") == 0) {
+                content_length = stoi(headers_map.find("Content-Length")->second);
+                int remaining_length = content_length;
+
+                remaining_length -= extract_body_from_leftover(&body_buffer, &leftover, remaining_length);
+                while (remaining_length > 0) {
+                    receive_buffer_length = recv(server_socket_fd, receive_buffer, BUFFER_SIZE, 0);
+                    remaining_length -= append_body(&body_buffer, receive_buffer, receive_buffer_length, &leftover, remaining_length);
+                }
+
+                if (response->content_type.substr(0, 4).compare("text") == 0)
+                    log_vector(&body_buffer);
+                write_file(&body_buffer, get_file_name(pipeline.front().second));
+            }
+//            else if (pipeline.front().first.compare("POST") == 0) {
+//
+//            }
+
+            pipeline.pop();
+        }
     }
 
     printf("\nFinished all requests\n");
